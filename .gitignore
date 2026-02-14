@@ -8,3 +8,4 @@ __pycache__/
 *.log
 
 *.md
+java/answer/*.md

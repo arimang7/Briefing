@@ -10,6 +10,7 @@ from scipy.signal import argrelextrema
 import google.generativeai as genai
 import os
 from dotenv import load_dotenv
+from notion_client import Client
 
 # --- 환경 변수 로드 및 Gemini 설정 ---
 load_dotenv()
@@ -21,6 +22,15 @@ if api_key:
     model = genai.GenerativeModel(model_name)
 else:
     st.sidebar.error("Gemini API Key가 .env 파일에 설정되어 있지 않습니다.")
+
+# --- Notion 설정 ---
+notion_token = os.getenv("NOTION_TOKEN")
+notion_db_id = os.getenv("NOTION_DATABASE_ID")
+
+if notion_token and notion_db_id:
+    notion = Client(auth=notion_token)
+else:
+    notion = None
 
 # --- 페이지 설정 ---
 st.set_page_config(
@@ -145,7 +155,7 @@ st.caption(f"Update: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | Technical:
 
 # 자산군 정의
 macro_ids = ["^TNX", "BTC-USD"]
-us_stocks = ["IONQ", "PLTR", "NVDA", "TSLA", "FIGMA", "GOOGL", "LEU", "COHR", "ASTS", "TEM"]
+us_stocks = ["IONQ", "PLTR", "NVDA", "TSLA", "FIG", "GOOGL", "LEU", "COHR", "ASTS", "TEM"]
 kr_stocks = ["017670.KS", "128940.KS", "100790.KQ", "006800.KS", "380550.KQ", "036930.KQ"]
 all_assets = macro_ids + us_stocks + kr_stocks
 
@@ -166,6 +176,42 @@ def save_qa_to_file(question, answer):
         f.write(f"### 답변\n")
         f.write(f"{answer}\n\n")
         f.write("---\n\n")
+    
+    # --- Notion에 추가 저장 ---
+    if notion:
+        try:
+            notion.pages.create(
+                parent={"database_id": notion_db_id},
+                properties={
+                    "주식 분석": {"title": [{"text": {"content": question[:100] + "..." if len(question) > 100 else question}}]},
+                    "날짜": {"date": {"start": datetime.now().isoformat()}},
+                },
+                children=[
+                    {
+                        "object": "block",
+                        "type": "heading_2",
+                        "heading_2": {"rich_text": [{"type": "text", "text": {"content": "질문"}}] }
+                    },
+                    {
+                        "object": "block",
+                        "type": "paragraph",
+                        "paragraph": {"rich_text": [{"type": "text", "text": {"content": question}}] }
+                    },
+                    {
+                        "object": "block",
+                        "type": "heading_2",
+                        "heading_2": {"rich_text": [{"type": "text", "text": {"content": "답변"}}] }
+                    },
+                    {
+                        "object": "block",
+                        "type": "paragraph",
+                        "paragraph": {"rich_text": [{"type": "text", "text": {"content": answer[:2000]}}] } # Notion 2000자 제한 대응
+                    }
+                ]
+            )
+        except Exception as e:
+            st.error(f"Notion 저장 오류: {e}")
+
 
 # --- 사이드바: Gemini 주식 챗봇 ---
 with st.sidebar:
