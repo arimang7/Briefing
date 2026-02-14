@@ -1,33 +1,33 @@
 # 💎 QuantumBrief Pro
 
-**QuantumBrief Pro**는 하모닉 패턴(Harmonic Patterns) 기술적 분석과 Google Gemini AI를 결합한 지능형 주식 분석 대시보드입니다. 실시간 시장 데이터 분석부터 AI 애널리스트와의 상담, 그리고 상담 결과의 Notion 자동 저장까지 지원합니다.
+**QuantumBrief Pro** is an intelligent stock analysis dashboard that combines technical harmonic pattern analysis with Google Gemini AI. It supports real-time market data analysis, consultation with an AI Analyst, and automatic saving of consultation results to a Notion database.
 
-## ✨ 주요 기능
+## ✨ Key Features
 
-- **실시간 기술적 분석**: 하모닉 패턴(Gartley, Bat, Butterfly 등) 자동 탐지 및 RSI 지표 제공
-- **AI 퀀트 애널리스트**: 대시보드 데이터를 기반으로 종목에 대해 질문하고 전문적인 답변 획득 (Gemini 1.5 Flash 모델 활용)
-- **영구 데이터 저장**: AI와의 대화 내용을 로컬 마크다운 파일(`java/answer/`) 및 **Notion 데이터베이스**에 동시 자동 저장
-- **글로벌 자산 모니터링**: 국장(KOSPI/KOSDAQ), 미장(NASDAQ/NYSE), 비트코인, 국채 금리 통합 관제
+- **Real-time Technical Analysis**: Automatic detection of Harmonic Patterns (Gartley, Bat, Butterfly, etc.) and RSI indicators.
+- **AI Quant Analyst**: Ask questions and get professional answers based on dashboard data using the Gemini 1.5 Flash model.
+- **Permanent Data Storage**: Conversation history is automatically saved to both local Markdown files (`java/answer/`) and a **Notion Database**.
+- **Global Asset Monitoring**: Integrated monitoring of Korean markets (KOSPI/KOSDAQ), US markets (NASDAQ/NYSE), Bitcoin, and Treasury yields.
 
-## 🛠 설치 및 로컬 실행 방법
+## 🛠 Installation & Local Execution
 
-1. **저장소 클론**
+1. **Clone the Repository**
 
    ```bash
    git clone https://github.com/YOUR_USERNAME/Briefing.git
    cd Briefing
    ```
 
-2. **가상환경 설정 및 패키지 설치**
+2. **Set up Virtual Environment & Install Packages**
 
    ```bash
    python -m venv venv
-   source venv/bin/scripts/activate  # Windows: .\venv\Scripts\Activate.ps1
+   source venv/bin/activate  # Windows: .\venv\Scripts\Activate.ps1
    pip install -r requirements.txt
    ```
 
-3. **환경 변수 설정**
-   프로젝트 루트 폴더에 `.env` 파일을 생성하고 아래 형식을 입력합니다. (이 파일은 절대 공개되지 않도록 주의하세요!)
+3. **Configure Environment Variables**
+   Create a `.env` file in the project root and enter the following format. (Ensure this file is never exposed publicly!)
 
    ```text
    GEMINI_API_KEY=your_gemini_api_key
@@ -35,30 +35,30 @@
    NOTION_DATABASE_ID=your_notion_database_id
    ```
 
-4. **앱 실행**
+4. **Run the App**
    ```bash
    streamlit run app.py
    ```
 
-## 🚀 배포 및 자동 저장 설정 (Streamlit Cloud & Notion)
+## 🚀 Deployment & Auto-save Configuration (Streamlit Cloud & Notion)
 
-### 1. Notion 연동 설정
+### 1. Notion Integration Setup
 
-- [Notion Developers](https://www.notion.so/my-integrations)에서 새 통합(Integration)을 생성합니다.
-- 분석 결과를 저장할 Notion 데이터베이스를 만들고, 우측 상단 `...` -> `연결 추가`에서 생성한 통합을 허용합니다.
-- 데이터베이스 첫 번째 컬럼(Title) 이름을 **"주식 분석"**으로, 두 번째 컬럼을 **"날짜"**(Date 유형)로 설정합니다.
+- Create a new integration at [Notion Developers](https://www.notion.so/my-integrations).
+- Create a Notion database to store analysis results, and in the top right `...` -> `Add connections`, allow the created integration.
+- Set the first column (Title) name as **"주식 분석"** and the second column as **"날짜"** (Date type).
 
-### 2. Streamlit Cloud 배포
+### 2. Streamlit Cloud Deployment
 
-- GitHub 저장소를 연결하여 배포합니다.
-- **Advanced Settings > Secrets** 메뉴에 `.env` 파일의 변수들을 동일하게 추가해야 AI 및 저장 기능이 작동합니다.
+- Connect your GitHub repository to deploy.
+- Add the variables from the `.env` file to the **Advanced Settings > Secrets** menu for AI and storage functions to work.
 
-## 📁 프로젝트 구조
+## 📁 Project Structure
 
-- `app.py`: 메인 대시보드 및 AI 비즈니스 로직
-- `java/answer/`: 로컬 대화 기록 저장 폴더
-- `requirements.txt`: 프로젝트 의존성 라이브러리 목록
-- `.gitignore`: 환경 변수 및 임시 파일 보호 설정
+- `app.py`: Main dashboard and AI business logic.
+- `java/answer/`: Local folder for saving conversation records.
+- `requirements.txt`: List of project dependency libraries.
+- `.gitignore`: Protection settings for environment variables and temporary files.
 
 ---
 
