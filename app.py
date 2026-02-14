@@ -1,0 +1,334 @@
+import streamlit as st
+import yfinance as yf
+import pandas as pd
+import pandas_ta as ta
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+from datetime import datetime
+import numpy as np
+from scipy.signal import argrelextrema
+import google.generativeai as genai
+import os
+from dotenv import load_dotenv
+
+# --- 환경 변수 로드 및 Gemini 설정 ---
+load_dotenv()
+api_key = os.getenv("GEMINI_API_KEY")
+model_name = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+
+if api_key:
+    genai.configure(api_key=api_key)
+    model = genai.GenerativeModel(model_name)
+else:
+    st.sidebar.error("Gemini API Key가 .env 파일에 설정되어 있지 않습니다.")
+
+# --- 페이지 설정 ---
+st.set_page_config(
+    page_title="QuantumBrief - Pro Analyst Dashboard",
+    page_icon="💎",
+    layout="wide",
+    initial_sidebar_state="expanded" # 챗봇을 위해 시작 시 서랍장 열어둠
+)
+
+# --- 커스텀 스타일링 ---
+st.markdown("""
+<style>
+    [data-testid="stAppViewContainer"] {
+        background-color: #0B0E14;
+        color: #E2E8F0;
+    }
+    .metric-card {
+        background-color: #151921;
+        padding: 24px;
+        border-radius: 16px;
+        border: 1px solid #2D3748;
+        box-shadow: 0 14px 28px rgba(0,0,0,0.5);
+        margin-bottom: 24px;
+    }
+    .ticker-title {
+        font-size: 30px;
+        font-weight: 900;
+        color: #F7FAFC;
+        margin-bottom: 5px;
+        letter-spacing: -0.5px;
+    }
+    .pattern-label {
+        background: rgba(49, 130, 206, 0.15);
+        color: #63B3ED;
+        padding: 5px 12px;
+        border-radius: 8px;
+        font-size: 13px;
+        font-weight: 700;
+        display: inline-block;
+        margin-bottom: 15px;
+        border: 1px solid rgba(99, 179, 237, 0.3);
+    }
+    /* RSI Highlighter */
+    .rsi-oversold { background-color: #2F855A; color: white; padding: 2px 8px; border-radius: 4px; font-weight: bold; }
+    .rsi-overbought { background-color: #C53030; color: white; padding: 2px 8px; border-radius: 4px; font-weight: bold; }
+    .rsi-neutral { color: #A0AEC0; }
+    
+    [data-testid="stMetricValue"] { font-size: 34px !important; font-weight: 800 !important; }
+    .main-header {
+        font-size: 48px; font-weight: 950; margin-bottom: 10px;
+        background: linear-gradient(135deg, #FFFFFF 0%, #718096 100%);
+        -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# --- 하모닉 패턴 분석 알고리즘 ---
+def detect_patterns(df):
+    if len(df) < 40: return "Insufficient Data", None
+    
+    n = 5 
+    df['min'] = df['Close'].iloc[argrelextrema(df['Close'].values, np.less_equal, order=n)[0]]
+    df['max'] = df['Close'].iloc[argrelextrema(df['Close'].values, np.greater_equal, order=n)[0]]
+    
+    points = df.dropna(subset=['min', 'max'], how='all')
+    if len(points) < 5: return "No Pattern", None
+    
+    last_5 = points.tail(5)
+    p_vals = last_5['Close'].values
+    p_idx = last_5.index
+    X, A, B, C, D = p_vals
+    
+    # Bullish/Bearish 판별
+    is_bullish = X < A and B < A and B > X and C > B and C < A and D < C
+    is_bearish = X > A and B > A and B < X and C < B and C > A and D > C
+
+    # 비율 계산
+    AB_XA = abs(B-A) / abs(A-X)
+    CD_AB = abs(D-C) / abs(B-A) if abs(B-A) != 0 else 0
+    AD_XA = abs(D-X) / abs(A-X)
+    
+    pattern_type = "Scanning"
+    if 0.58 < AB_XA < 0.65: pattern_type = "Gartley"
+    elif 0.38 < AB_XA < 0.52: pattern_type = "Bat"
+    elif 0.75 < AB_XA < 0.82: pattern_type = "Butterfly"
+    else: pattern_type = "Complex Structure"
+
+    direction = "(Bullish 🔼)" if is_bullish else ("(Bearish 🔽)" if is_bearish else "")
+    abcd_status = "AB=CD OK" if 0.88 < CD_AB < 1.12 else f"AB=CD ratio {CD_AB:.2f}"
+    
+    label = f"{pattern_type} {direction} | {abcd_status}"
+    return label, last_5
+
+# --- 통합 데이터 로드 ---
+@st.cache_data(ttl=600)
+def fetch_all_assets(tickers):
+    data = {}
+    for t in tickers:
+        try:
+            stock = yf.Ticker(t)
+            df = stock.history(period="6mo")
+            if df.empty: continue
+            
+            df['RSI'] = ta.rsi(df['Close'], length=14)
+            pat_label, pat_points = detect_patterns(df.copy())
+            
+            data[t] = {
+                'df': df,
+                'price': df['Close'].iloc[-1],
+                'prev': df['Close'].iloc[-2],
+                'vol': df['Volume'].iloc[-1],
+                'rsi': df['RSI'].iloc[-1],
+                'pattern_label': pat_label,
+                'pattern_points': pat_points
+            }
+        except: continue
+    return data
+
+# --- 대시보드 메인 ---
+st.markdown('<p class="main-header">💎 QuantumBrief Pro</p>', unsafe_allow_html=True)
+st.caption(f"Update: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | Technical: Fibonacci Harmonic Ratios (Simplified)")
+
+# 자산군 정의
+macro_ids = ["^TNX", "BTC-USD"]
+us_stocks = ["IONQ", "PLTR", "NVDA", "TSLA", "FIGMA", "GOOGL", "LEU", "COHR", "ASTS", "TEM"]
+kr_stocks = ["017670.KS", "128940.KS", "100790.KQ", "006800.KS", "380550.KQ", "036930.KQ"]
+all_assets = macro_ids + us_stocks + kr_stocks
+
+# 데이터 먼저 로드 (챗봇에서 사용하기 위해)
+data_store = fetch_all_assets(all_assets)
+
+# --- Q&A 저장 함수 ---
+def save_qa_to_file(question, answer):
+    date_str = datetime.now().strftime("%Y-%m-%d")
+    time_str = datetime.now().strftime("%H:%M:%S")
+    dir_path = "java/answer"
+    os.makedirs(dir_path, exist_ok=True)
+    file_path = os.path.join(dir_path, f"{date_str}.md")
+    
+    with open(file_path, "a", encoding="utf-8") as f:
+        f.write(f"## [{time_str}] 질문\n")
+        f.write(f"{question}\n\n")
+        f.write(f"### 답변\n")
+        f.write(f"{answer}\n\n")
+        f.write("---\n\n")
+
+# --- 사이드바: Gemini 주식 챗봇 ---
+with st.sidebar:
+    st.markdown("### 🤖 Quantum Sidekick")
+    st.markdown("현재 대시보드 데이터를 기반으로 질문에 답변하며, 모든 대화는 `java/answer` 폴더에 저장됩니다.")
+    st.divider()
+
+    # 채팅 기록 초기화
+    if "messages" not in st.session_state:
+        st.session_state.messages = []
+
+    # 채팅 메시지 표시 컨테이너
+    chat_container = st.container()
+    with chat_container:
+        for message in st.session_state.messages:
+            with st.chat_message(message["role"]):
+                st.markdown(message["content"])
+
+    # 사용자 입력 (사이드바 하단에 고정됨)
+    if prompt := st.chat_input("이 종목들의 패턴에 대해 물어보세요!"):
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        
+        # UI 즉시 업데이트를 위해 메시지 표시
+        with chat_container:
+            with st.chat_message("user"):
+                st.markdown(prompt)
+
+            # Gemini 답변 생성
+            with st.chat_message("assistant"):
+                if api_key:
+                    try:
+                        # 현재 데이터 컨텍스트 생성
+                        context = "현재 분석 중인 종목 데이터:\n"
+                        if data_store:
+                            for tid, stats in data_store.items():
+                                context += f"- {tid}: 현재가 {stats['price']:.2f}, RSI {stats['rsi']:.1f}, 패턴 {stats['pattern_label']}\n"
+                        else:
+                            context += "데이터 로딩 중...\n"
+                        
+                        system_prompt = f"너는 20년 경력의 시니어 퀀트 애널리스트야. 다음 데이터를 참고해서 사용자의 질문에 전문적이고 친절하게 답변해줘.\n\n{context}"
+                        
+                        # 채팅 히스토리 포함 전송
+                        chat = model.start_chat(history=[])
+                        full_prompt = f"{system_prompt}\n\n사용자 질문: {prompt}"
+                        response = chat.send_message(full_prompt)
+                        
+                        st.markdown(response.text)
+                        st.session_state.messages.append({"role": "assistant", "content": response.text})
+                        
+                        # 대화 저장
+                        save_qa_to_file(prompt, response.text)
+                    except Exception as e:
+                        st.error(f"Gemini 오류: {e}")
+                else:
+                    st.warning("API Key가 설정되어 있지 않아 답변을 생성할 수 없습니다.")
+        
+        st.rerun()
+
+# 2. 메인 분석 영역 (시장별 섹션 분리)
+sections = [
+    ("🌐 Global Macro Radar Analysis", macro_ids),
+    ("🇺🇸 US Stocks Analysis", us_stocks),
+    ("🇰🇷 KR Stocks Analysis", kr_stocks)
+]
+
+# 종목 및 지표 명칭 매핑
+display_names = {
+    "^TNX": "US 10Y Yield",
+    "BTC-USD": "Bitcoin (USD)",
+    "017670.KS": "SK Telecom",
+    "128940.KS": "Hanmi Pharm",
+    "100790.KQ": "MiraeAsset Venture",
+    "006800.KS": "MiraeAsset Securities",
+    "380550.KQ": "Neurophet",
+    "036930.KQ": "Jusung Engineering"
+}
+
+for section_title, tickers in sections:
+    st.divider()
+    st.subheader(section_title)
+    
+    for i in range(0, len(tickers), 2):
+        row_cols = st.columns(2)
+        for j in range(2):
+            if i + j < len(tickers):
+                asset_id = tickers[i + j]
+                with row_cols[j]:
+                    if asset_id in data_store:
+                        d = data_store[asset_id]
+                        df = d['df'].tail(60)
+                        
+                        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+                        
+                        # 제목 및 요약 정보
+                        title = display_names.get(asset_id, asset_id)
+                        st.markdown(f'<p class="ticker-title">{title}</p>', unsafe_allow_html=True)
+                        st.markdown(f'<div class="pattern-label">{d["pattern_label"]}</div>', unsafe_allow_html=True)
+                        
+                        # RSI 상태 하이라이트
+                        rsi_val = d['rsi']
+                        rsi_class = "rsi-neutral"
+                        if rsi_val >= 70: rsi_class = "rsi-overbought"
+                        elif rsi_val <= 30: rsi_class = "rsi-oversold"
+                        st.markdown(f"**RSI(14):** <span class='{rsi_class}'>{rsi_val:.1f}</span>", unsafe_allow_html=True)
+
+                        # --- 차트 생성 (Height 상향) ---
+                        fig = make_subplots(
+                            rows=3, cols=1, 
+                            shared_xaxes=True, 
+                            vertical_spacing=0.05,
+                            row_heights=[0.6, 0.2, 0.2]
+                        )
+
+                        # 1. 캔들스틱 차트
+                        fig.add_trace(go.Candlestick(
+                            x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'],
+                            name='OHLC', increasing_line_color='#00C805', decreasing_line_color='#FF4B4B'
+                        ), row=1, col=1)
+
+                        # 2. 하모닉 시각화
+                        if d['pattern_points'] is not None:
+                            pts = d['pattern_points']
+                            x_coords, y_coords = pts.index, pts['Close'].values
+                            fig.add_trace(go.Scatter(
+                                x=x_coords, y=y_coords, mode='lines+markers+text',
+                                text=['X','A','B','C','D'], textposition="top center",
+                                line=dict(color='#ECC94B', width=3, dash='dash'),
+                                marker=dict(size=10, symbol='diamond', color='#ECC94B'),
+                                name='Harmonic'
+                            ), row=1, col=1)
+                            fig.add_trace(go.Scatter(
+                                x=[x_coords[0], x_coords[1], x_coords[2], x_coords[0]],
+                                y=[y_coords[0], y_coords[1], y_coords[2], y_coords[0]],
+                                fill="toself", fillcolor='rgba(236, 201, 75, 0.1)',
+                                line=dict(width=0), showlegend=False
+                            ), row=1, col=1)
+                            fig.add_trace(go.Scatter(
+                                x=[x_coords[2], x_coords[3], x_coords[4], x_coords[2]],
+                                y=[y_coords[2], y_coords[3], y_coords[4], y_coords[2]],
+                                fill="toself", fillcolor='rgba(236, 201, 75, 0.15)',
+                                line=dict(width=0), showlegend=False
+                            ), row=1, col=1)
+
+                        # 3. 거래량
+                        v_colors = ['#FF4B4B' if c < o else '#00C805' for c, o in zip(df['Close'], df['Open'])]
+                        fig.add_trace(go.Bar(
+                            x=df.index, y=df['Volume'], marker_color=v_colors, name='Vol'
+                        ), row=2, col=1)
+
+                        # 4. RSI 및 기준선
+                        fig.add_trace(go.Scatter(x=df.index, y=df['RSI'], line=dict(color='#63B3ED', width=2), name='RSI'), row=3, col=1)
+                        fig.add_hline(y=70, line_dash="dot", line_color="#C53030", opacity=0.5, row=3, col=1)
+                        fig.add_hline(y=30, line_dash="dot", line_color="#2F855A", opacity=0.5, row=3, col=1)
+
+                        fig.update_layout(
+                            height=700, margin=dict(l=10, r=10, t=10, b=10),
+                            paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+                            xaxis_rangeslider_visible=False, showlegend=False
+                        )
+                        fig.update_yaxes(gridcolor='#2D3748', zeroline=False)
+                        fig.update_xaxes(gridcolor='#2D3748')
+                        
+                        st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+                        st.markdown('</div>', unsafe_allow_html=True)
+                    else:
+                        st.error(f"Waiting for {asset_id} data...")
