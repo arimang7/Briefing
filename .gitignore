@@ -7,5 +7,5 @@ __pycache__/
 .idea/
 *.log
 
-*.md
+prompt.md
 java/answer/*.md
