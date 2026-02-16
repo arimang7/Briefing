@@ -11,6 +11,7 @@ import google.generativeai as genai
 import os
 from dotenv import load_dotenv
 from notion_client import Client
+import json
 
 # --- 환경 변수 로드 및 Gemini 설정 ---
 load_dotenv()
@@ -137,7 +138,16 @@ def fetch_all_assets(tickers):
             df['RSI'] = ta.rsi(df['Close'], length=14)
             pat_label, pat_points = detect_patterns(df.copy())
             
+            # Fetch name (Optional fallback)
+            name = t
+            try:
+                # Use cached info if available to avoid extra requests
+                name = stock.info.get('longName') or stock.info.get('shortName') or t
+            except:
+                pass
+
             data[t] = {
+                'name': name,
                 'df': df,
                 'price': df['Close'].iloc[-1],
                 'prev': df['Close'].iloc[-2],
@@ -153,10 +163,33 @@ def fetch_all_assets(tickers):
 st.markdown('<p class="main-header">💎 QuantumBrief Pro</p>', unsafe_allow_html=True)
 st.caption(f"Update: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | Technical: Fibonacci Harmonic Ratios (Simplified)")
 
-# 자산군 정의
-macro_ids = ["^TNX", "BTC-USD"]
-us_stocks = ["IONQ", "PLTR", "NVDA", "TSLA", "FIG", "GOOGL", "LEU", "COHR", "ASTS", "TEM"]
-kr_stocks = ["017670.KS", "128940.KS", "100790.KQ", "006800.KS", "380550.KQ", "036930.KQ"]
+# --- 자산 관리 기능 ---
+ASSETS_FILE = "assets.json"
+
+def load_assets():
+    try:
+        with open(ASSETS_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        # 기본값 반환 및 파일 생성
+        default_assets = {
+            "macro_ids": ["^TNX", "BTC-USD"],
+            "us_stocks": ["IONQ", "PLTR", "NVDA", "TSLA", "FIG", "GOOGL", "LEU", "COHR", "ASTS", "TEM"],
+            "kr_stocks": ["017670.KS", "128940.KS", "100790.KQ", "006800.KS", "380550.KQ", "036930.KQ"]
+        }
+        save_assets(default_assets)
+        return default_assets
+
+def save_assets(assets):
+    with open(ASSETS_FILE, "w", encoding="utf-8") as f:
+        json.dump(assets, f, indent=2, ensure_ascii=False)
+
+# 자산 로드
+assets_data = load_assets()
+macro_ids = assets_data.get("macro_ids", [])
+us_stocks = assets_data.get("us_stocks", [])
+kr_stocks = assets_data.get("kr_stocks", [])
+display_names = assets_data.get("display_names", {})
 all_assets = macro_ids + us_stocks + kr_stocks
 
 # 데이터 먼저 로드 (챗봇에서 사용하기 위해)
@@ -270,24 +303,38 @@ with st.sidebar:
         
         st.rerun()
 
+    st.divider()
+    with st.expander("⚙️ Asset Management"):
+        st.write("Edit tickers (comma separated)")
+        
+        new_macro = st.text_area("Global Macro", value=", ".join(macro_ids))
+        new_us = st.text_area("US Stocks", value=", ".join(us_stocks))
+        new_kr = st.text_area("KR Stocks", value=", ".join(kr_stocks))
+        
+        st.write("Edit Display Names (JSON format)")
+        new_names_json = st.text_area("Display Names Mapping", value=json.dumps(display_names, indent=2, ensure_ascii=False), height=200)
+        
+        if st.button("Save & Update"):
+            try:
+                updated_names = json.loads(new_names_json)
+                updated_assets = {
+                    "macro_ids": [x.strip() for x in new_macro.split(",") if x.strip()],
+                    "us_stocks": [x.strip() for x in new_us.split(",") if x.strip()],
+                    "kr_stocks": [x.strip() for x in new_kr.split(",") if x.strip()],
+                    "display_names": updated_names
+                }
+                save_assets(updated_assets)
+                st.success("Assets updated!")
+                st.rerun()
+            except json.JSONDecodeError:
+                st.error("Invalid JSON format for Display Names.")
+
 # 2. 메인 분석 영역 (시장별 섹션 분리)
 sections = [
     ("🌐 Global Macro Radar Analysis", macro_ids),
     ("🇺🇸 US Stocks Analysis", us_stocks),
     ("🇰🇷 KR Stocks Analysis", kr_stocks)
 ]
-
-# 종목 및 지표 명칭 매핑
-display_names = {
-    "^TNX": "US 10Y Yield",
-    "BTC-USD": "Bitcoin (USD)",
-    "017670.KS": "SK Telecom",
-    "128940.KS": "Hanmi Pharm",
-    "100790.KQ": "MiraeAsset Venture",
-    "006800.KS": "MiraeAsset Securities",
-    "380550.KQ": "Neurophet",
-    "036930.KQ": "Jusung Engineering"
-}
 
 for section_title, tickers in sections:
     st.divider()
@@ -306,7 +353,7 @@ for section_title, tickers in sections:
                         st.markdown('<div class="metric-card">', unsafe_allow_html=True)
                         
                         # 제목 및 요약 정보
-                        title = display_names.get(asset_id, asset_id)
+                        title = display_names.get(asset_id, d.get('name', asset_id))
                         st.markdown(f'<p class="ticker-title">{title}</p>', unsafe_allow_html=True)
                         st.markdown(f'<div class="pattern-label">{d["pattern_label"]}</div>', unsafe_allow_html=True)
                         
@@ -369,10 +416,23 @@ for section_title, tickers in sections:
                         fig.update_layout(
                             height=700, margin=dict(l=10, r=10, t=10, b=10),
                             paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
-                            xaxis_rangeslider_visible=False, showlegend=False
+                            xaxis_rangeslider_visible=False, showlegend=False,
+                            # 모바일 터치 대응을 위한 차트 테두리 추가
+                            shapes=[dict(
+                                type="rect",
+                                xref="paper", yref="paper",
+                                x0=0, y0=0, x1=1, y1=1,
+                                line=dict(color="#4A5568", width=2)
+                            )]
                         )
-                        fig.update_yaxes(gridcolor='#2D3748', zeroline=False)
-                        fig.update_xaxes(gridcolor='#2D3748')
+                        fig.update_yaxes(
+                            gridcolor='#2D3748', zeroline=False,
+                            showline=True, linewidth=1, linecolor='#4A5568', mirror=True
+                        )
+                        fig.update_xaxes(
+                            gridcolor='#2D3748',
+                            showline=True, linewidth=1, linecolor='#4A5568', mirror=True
+                        )
                         
                         st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
                         st.markdown('</div>', unsafe_allow_html=True)

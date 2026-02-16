@@ -1,0 +1,17 @@
+{
+  "macro_ids": ["^TNX", "BTC-USD"],
+  "us_stocks": ["IONQ", "PLTR", "NVDA", "TSLA", "FIG", "GOOGL", "LEU", "COHR", "ASTS", "TEM"],
+  "kr_stocks": ["005930.KS", "000660.KS", "017670.KS", "128940.KS", "100790.KQ", "006800.KS", "380550.KQ", "036930.KQ"],
+  "display_names": {
+    "^TNX": "US 10Y Yield",
+    "BTC-USD": "Bitcoin (USD)",
+    "005930.KS": "삼성전자",
+    "000660.KS": "SK하이닉스",
+    "017670.KS": "SK Telecom",
+    "128940.KS": "Hanmi Pharm",
+    "100790.KQ": "MiraeAsset Venture",
+    "006800.KS": "MiraeAsset Securities",
+    "380550.KQ": "Neurophet",
+    "036930.KQ": "Jusung Engineering"
+  }
+}
