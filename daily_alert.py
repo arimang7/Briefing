@@ -13,7 +13,7 @@ import requests
 from datetime import datetime
 import yfinance as yf
 import pandas as pd
-import pandas_ta as ta
+# pandas_ta는 Python 3.11 Linux 환경에서 미지원 → 직접 RSI 계산
 import numpy as np
 from scipy.signal import argrelextrema
 import google.generativeai as genai
@@ -34,6 +34,17 @@ model = genai.GenerativeModel(GEMINI_MODEL)
 
 
 # ── 하모닉 패턴 감지 (app.py와 동일 로직) ────────────────────────
+def calc_rsi(series: pd.Series, length: int = 14) -> pd.Series:
+    """pandas만으로 RSI 계산 (pandas_ta 대체)"""
+    delta = series.diff()
+    gain = delta.clip(lower=0)
+    loss = -delta.clip(upper=0)
+    avg_gain = gain.ewm(com=length - 1, min_periods=length).mean()
+    avg_loss = loss.ewm(com=length - 1, min_periods=length).mean()
+    rs = avg_gain / avg_loss
+    return 100 - (100 / (1 + rs))
+
+
 def detect_patterns(df):
     if len(df) < 40:
         return "Insufficient Data", None
@@ -82,7 +93,7 @@ def fetch_stock_data(tickers: list) -> dict:
             if df.empty:
                 continue
 
-            df['RSI'] = ta.rsi(df['Close'], length=14)
+            df['RSI'] = calc_rsi(df['Close'], length=14)
             pat_label, _ = detect_patterns(df.copy())
 
             price   = df['Close'].iloc[-1]
