@@ -213,18 +213,37 @@ def main():
     except FileNotFoundError:
         print("assets.json 없음 → 기본 종목 사용")
         assets = {
-            "macro_ids": ["^TNX", "BTC-USD"],
+            "macro_ids": ["^TNX", "^IRX", "^VIX", "DX-Y.NYB", "GC=F", "CL=F", "SI=F", "^IXIC", "^KS11"],
+            "crypto": ["BTC-USD", "ETH-USD", "SOL-USD"],
             "us_stocks": ["IONQ", "PLTR", "NVDA", "TSLA"],
             "kr_stocks": ["017670.KS", "128940.KS"],
         }
 
     all_tickers = (
         assets.get("macro_ids", []) +
+        assets.get("crypto", []) +
         assets.get("us_stocks", []) +
         assets.get("kr_stocks", [])
     )
     print(f"\n[1/3] 종목 데이터 수집 중... ({len(all_tickers)}개)")
     data = fetch_stock_data(all_tickers)
+
+    # 10Y-3M 장단기 금리차 스프레드 계산
+    if "^TNX" in data and "^IRX" in data:
+        try:
+            spread_val = data["^TNX"]["price"] - data["^IRX"]["price"]
+            spread_chg = data["^TNX"]["change_pct"] - data["^IRX"]["change_pct"]
+            rsi_val    = (data["^TNX"]["rsi"] + data["^IRX"]["rsi"]) / 2
+            data["SPREAD_10Y2Y"] = {
+                "price":      spread_val,
+                "change_pct": spread_chg,
+                "rsi":        rsi_val,
+                "rsi_signal": "⚪ 중립",
+                "pattern":    f"10Y({data['^TNX']['price']:.2f}%) - 3M({data['^IRX']['price']:.2f}%)",
+            }
+            print(f"  ✓ SPREAD_10Y2Y: {spread_val:+.2f}%p")
+        except Exception as e:
+            print(f"  ✗ 스프레드 계산 오류: {e}")
 
     if not data:
         print("데이터 수집 실패. 종료.")
