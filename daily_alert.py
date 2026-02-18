@@ -8,6 +8,7 @@ Streamlit 없이 독립 실행 가능. GitHub Actions로 스케줄링.
 """
 
 import os
+import sys
 import json
 import requests
 from datetime import datetime
@@ -20,6 +21,7 @@ import google.generativeai as genai
 from dotenv import load_dotenv
 
 # ── 환경 변수 로드 ──────────────────────────────────────────────
+# GitHub Actions: .env 파일 없음 → os.environ에서 직접 읽음
 load_dotenv()
 
 GEMINI_API_KEY    = os.getenv("GEMINI_API_KEY")
@@ -28,9 +30,18 @@ TELEGRAM_TOKEN    = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID  = os.getenv("TELEGRAM_CHAT_ID")
 ASSETS_FILE       = os.path.join(os.path.dirname(__file__), "assets.json")
 
-# ── Gemini 초기화 ────────────────────────────────────────────────
+# ── API 키 검증 (없으면 즉시 종료) ──────────────────────────────
+if not GEMINI_API_KEY:
+    print("❌ GEMINI_API_KEY가 설정되지 않았습니다. GitHub Secrets를 확인하세요.")
+    sys.exit(1)
+if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
+    print("❌ TELEGRAM_BOT_TOKEN 또는 TELEGRAM_CHAT_ID가 설정되지 않았습니다.")
+    sys.exit(1)
+
+# ── Gemini 초기화 (키 검증 후 실행) ─────────────────────────────
 genai.configure(api_key=GEMINI_API_KEY)
 model = genai.GenerativeModel(GEMINI_MODEL)
+print(f"✓ Gemini 초기화 완료: {GEMINI_MODEL}")
 
 
 # ── 하모닉 패턴 감지 (app.py와 동일 로직) ────────────────────────
