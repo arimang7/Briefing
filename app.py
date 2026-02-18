@@ -1,7 +1,7 @@
 import streamlit as st
 import yfinance as yf
 import pandas as pd
-import pandas_ta as ta
+# pandas_ta → numba 의존성으로 Python 3.13 미지원, 순수 pandas로 대체
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from datetime import datetime
@@ -88,6 +88,16 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+# --- RSI 계산 (pandas_ta 대체) ---
+def calc_rsi(series, length=14):
+    delta = series.diff()
+    gain = delta.clip(lower=0)
+    loss = -delta.clip(upper=0)
+    avg_gain = gain.ewm(com=length - 1, min_periods=length).mean()
+    avg_loss = loss.ewm(com=length - 1, min_periods=length).mean()
+    rs = avg_gain / avg_loss
+    return 100 - (100 / (1 + rs))
+
 # --- 하모닉 패턴 분석 알고리즘 ---
 def detect_patterns(df):
     if len(df) < 40: return "Insufficient Data", None
@@ -135,7 +145,7 @@ def fetch_all_assets(tickers):
             df = stock.history(period="6mo")
             if df.empty: continue
             
-            df['RSI'] = ta.rsi(df['Close'], length=14)
+            df['RSI'] = calc_rsi(df['Close'], length=14)
             pat_label, pat_points = detect_patterns(df.copy())
             
             # Fetch name (Optional fallback)
