@@ -26,13 +26,23 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      # Secret 주입 여부 확인 (값은 노출 안 됨)
+      - name: Verify secrets are set
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          echo "GEMINI_API_KEY set:     $( [ -n "$GEMINI_API_KEY" ]     && echo YES || echo NO )"
+          echo "TELEGRAM_BOT_TOKEN set: $( [ -n "$TELEGRAM_BOT_TOKEN" ] && echo YES || echo NO )"
+          echo "TELEGRAM_CHAT_ID set:   $( [ -n "$TELEGRAM_CHAT_ID" ]   && echo YES || echo NO )"
+
       - name: Run daily alert
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          GEMINI_MODEL: ${{ secrets.GEMINI_MODEL }}
+          GEMINI_MODEL: ${{ secrets.GEMINI_MODEL || 'gemini-1.5-flash' }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          # Notion은 alert에서 사용 안 하지만 혹시 모를 import 오류 방지
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
           NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
         run: python daily_alert.py
