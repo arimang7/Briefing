@@ -183,7 +183,8 @@ def load_assets():
     except FileNotFoundError:
         # 기본값 반환 및 파일 생성
         default_assets = {
-            "macro_ids": ["^TNX", "BTC-USD"],
+            "macro_ids": ["^TNX"],
+            "crypto": ["BTC-USD", "ETH-USD", "SOL-USD"],
             "us_stocks": ["IONQ", "PLTR", "NVDA", "TSLA", "FIG", "GOOGL", "LEU", "COHR", "ASTS", "TEM"],
             "kr_stocks": ["017670.KS", "128940.KS", "100790.KQ", "006800.KS", "380550.KQ", "036930.KQ"]
         }
@@ -197,13 +198,48 @@ def save_assets(assets):
 # 자산 로드
 assets_data = load_assets()
 macro_ids = assets_data.get("macro_ids", [])
+crypto = assets_data.get("crypto", [])
 us_stocks = assets_data.get("us_stocks", [])
 kr_stocks = assets_data.get("kr_stocks", [])
 display_names = assets_data.get("display_names", {})
-all_assets = macro_ids + us_stocks + kr_stocks
+all_assets = macro_ids + crypto + us_stocks + kr_stocks
 
 # 데이터 먼저 로드 (챗봇에서 사용하기 위해)
 data_store = fetch_all_assets(all_assets)
+
+# --- 10Y-3M 장단기 금리차 스프레드 계산 (가상 자산 추가) ---
+if "^TNX" in data_store and "^IRX" in data_store:
+    try:
+        tnx = data_store["^TNX"]
+        irx = data_store["^IRX"]
+        # 두 시리즈를 날짜 기준으로 정렬 후 공통 인덱스로 스프레드 계산
+        spread_close = tnx['df']['Close'].subtract(irx['df']['Close'], fill_value=None).dropna()
+        spread_df = tnx['df'].copy()
+        spread_df['Close'] = spread_close
+        spread_df['Open']  = tnx['df']['Open'] - irx['df']['Open'].reindex(tnx['df'].index, method='nearest')
+        spread_df['High']  = spread_df['Close']
+        spread_df['Low']   = spread_df['Close']
+        spread_df['RSI']   = calc_rsi(spread_df['Close'], length=14)
+        spread_price = spread_close.iloc[-1]
+        spread_prev  = spread_close.iloc[-2]
+        pat_label, pat_points = detect_patterns(spread_df.copy())
+        data_store["SPREAD_10Y2Y"] = {
+            'name': '10Y-3M Spread',
+            'df': spread_df,
+            'price': spread_price,
+            'prev': spread_prev,
+            'vol': 0,
+            'rsi': spread_df['RSI'].iloc[-1],
+            'pattern_label': pat_label,
+            'pattern_points': pat_points,
+        }
+    except Exception as e:
+        pass  # 스프레드 계산 실패 시 무시
+
+# 화면에 표시할 매크로 목록: ^IRX는 계산용이므로 제외, SPREAD_10Y2Y 추가
+macro_display = [t for t in macro_ids if t != "^IRX"]
+if "SPREAD_10Y2Y" in data_store:
+    macro_display.append("SPREAD_10Y2Y")
 
 # --- Q&A 저장 함수 ---
 def save_qa_to_file(question, answer):
@@ -318,6 +354,7 @@ with st.sidebar:
         st.write("Edit tickers (comma separated)")
         
         new_macro = st.text_area("Global Macro", value=", ".join(macro_ids))
+        new_crypto = st.text_area("Crypto", value=", ".join(crypto))
         new_us = st.text_area("US Stocks", value=", ".join(us_stocks))
         new_kr = st.text_area("KR Stocks", value=", ".join(kr_stocks))
         
@@ -329,6 +366,7 @@ with st.sidebar:
                 updated_names = json.loads(new_names_json)
                 updated_assets = {
                     "macro_ids": [x.strip() for x in new_macro.split(",") if x.strip()],
+                    "crypto": [x.strip() for x in new_crypto.split(",") if x.strip()],
                     "us_stocks": [x.strip() for x in new_us.split(",") if x.strip()],
                     "kr_stocks": [x.strip() for x in new_kr.split(",") if x.strip()],
                     "display_names": updated_names
@@ -341,18 +379,19 @@ with st.sidebar:
 
 # 2. 메인 분석 영역 (시장별 섹션 분리)
 sections = [
-    ("🌐 Global Macro Radar Analysis", macro_ids),
-    ("🇺🇸 US Stocks Analysis", us_stocks),
-    ("🇰🇷 KR Stocks Analysis", kr_stocks)
+    ("🌐 Global Macro Radar Analysis", macro_display, 3),
+    ("₿ Crypto Analysis", crypto, 3),
+    ("🇺🇸 US Stocks Analysis", us_stocks, 3),
+    ("🇰🇷 KR Stocks Analysis", kr_stocks, 3)
 ]
 
-for section_title, tickers in sections:
+for section_title, tickers, cols_per_row in sections:
     st.divider()
     st.subheader(section_title)
     
-    for i in range(0, len(tickers), 2):
-        row_cols = st.columns(2)
-        for j in range(2):
+    for i in range(0, len(tickers), cols_per_row):
+        row_cols = st.columns(cols_per_row)
+        for j in range(cols_per_row):
             if i + j < len(tickers):
                 asset_id = tickers[i + j]
                 with row_cols[j]:
