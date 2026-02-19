@@ -95,7 +95,7 @@ def detect_patterns(df):
 
 
 # ── 주식 데이터 수집 ─────────────────────────────────────────────
-def fetch_stock_data(tickers: list) -> dict:
+def fetch_stock_data(tickers: list, display_names: dict = {}) -> dict:
     data = {}
     for t in tickers:
         try:
@@ -120,14 +120,24 @@ def fetch_stock_data(tickers: list) -> dict:
             else:
                 rsi_signal = "⚪ 중립"
 
+            # 이름 및 링크 설정
+            name = display_names.get(t, t)
+            if t.endswith((".KS", ".KQ")):
+                code = t.split(".")[0]
+                url = f"https://finance.naver.com/item/main.naver?code={code}"
+            else:
+                url = f"https://finance.yahoo.com/quote/{t}"
+
             data[t] = {
+                "name":       name,
+                "url":        url,
                 "price":      price,
                 "change_pct": change,
                 "rsi":        rsi,
                 "rsi_signal": rsi_signal,
                 "pattern":    pat_label,
             }
-            print(f"  ✓ {t}: {price:.2f} ({change:+.1f}%) RSI={rsi:.1f}")
+            print(f"  ✓ {name}: {price:.2f} ({change:+.1f}%) RSI={rsi:.1f}")
         except Exception as e:
             print(f"  ✗ {t} 오류: {e}")
     return data
@@ -141,7 +151,7 @@ def analyze_with_gemini(data: dict) -> str:
     summary_lines = []
     for ticker, d in data.items():
         summary_lines.append(
-            f"- {ticker}: 현재가 {d['price']:.2f}, "
+            f"- {d['name']} ({d['url']}): 현재가 {d['price']:.2f}, "
             f"등락 {d['change_pct']:+.1f}%, "
             f"RSI {d['rsi']:.1f} ({d['rsi_signal']}), "
             f"패턴 [{d['pattern']}]"
@@ -162,9 +172,11 @@ def analyze_with_gemini(data: dict) -> str:
 
 [출력 형식 - 반드시 아래 형식으로만 답변]
 각 종목마다 한 줄:
-🟢 매수 [티커]: 이유 한 줄
-🔴 매도 [티커]: 이유 한 줄
-⚪ 관망 [티커]: 이유 한 줄
+🟢 매수 [주식명](링크): 이유 한 줄
+🔴 매도 [주식명](링크): 이유 한 줄
+⚪ 관망 [주식명](링크): 이유 한 줄
+
+* 주식명은 데이터에 제공된 이름을 사용하고, 링크도 그대로 포함해줘.
 
 마지막에 오늘의 시장 총평을 2~3줄로 작성해줘.
 """
@@ -219,6 +231,8 @@ def main():
             "kr_stocks": ["017670.KS", "128940.KS"],
         }
 
+    display_names = assets.get("display_names", {})
+
     all_tickers = (
         assets.get("macro_ids", []) +
         assets.get("crypto", []) +
@@ -226,7 +240,7 @@ def main():
         assets.get("kr_stocks", [])
     )
     print(f"\n[1/3] 종목 데이터 수집 중... ({len(all_tickers)}개)")
-    data = fetch_stock_data(all_tickers)
+    data = fetch_stock_data(all_tickers, display_names)
 
     # 10Y-3M 장단기 금리차 스프레드 계산
     if "^TNX" in data and "^IRX" in data:
@@ -235,6 +249,8 @@ def main():
             spread_chg = data["^TNX"]["change_pct"] - data["^IRX"]["change_pct"]
             rsi_val    = (data["^TNX"]["rsi"] + data["^IRX"]["rsi"]) / 2
             data["SPREAD_10Y2Y"] = {
+                "name":       display_names.get("SPREAD_10Y2Y", "10Y-3M Spread"),
+                "url":        "https://fred.stlouisfed.org/series/T10Y3M",
                 "price":      spread_val,
                 "change_pct": spread_chg,
                 "rsi":        rsi_val,
