@@ -7,7 +7,7 @@ from plotly.subplots import make_subplots
 from datetime import datetime
 import numpy as np
 from scipy.signal import argrelextrema
-import google.generativeai as genai
+from google import genai
 import os
 from dotenv import load_dotenv
 from notion_client import Client
@@ -19,8 +19,7 @@ api_key = os.getenv("GEMINI_API_KEY")
 model_name = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
 
 if api_key:
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel(model_name)
+    client = genai.Client(api_key=api_key)
 else:
     st.sidebar.error("Gemini API Key가 .env 파일에 설정되어 있지 않습니다.")
 
@@ -333,9 +332,9 @@ with st.sidebar:
                         system_prompt = f"너는 20년 경력의 시니어 퀀트 애널리스트야. 다음 데이터를 참고해서 사용자의 질문에 전문적이고 친절하게 답변해줘.\n\n{context}"
                         
                         # 채팅 히스토리 포함 전송
-                        chat = model.start_chat(history=[])
+                        chat = client.chats.create(model=model_name)
                         full_prompt = f"{system_prompt}\n\n사용자 질문: {prompt}"
-                        response = chat.send_message(full_prompt)
+                        response = chat.send_message(message=full_prompt)
                         
                         st.markdown(response.text)
                         st.session_state.messages.append({"role": "assistant", "content": response.text})

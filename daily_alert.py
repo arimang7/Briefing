@@ -17,7 +17,7 @@ import pandas as pd
 # pandas_ta는 Python 3.11 Linux 환경에서 미지원 → 직접 RSI 계산
 import numpy as np
 from scipy.signal import argrelextrema
-import google.generativeai as genai
+from google import genai
 from dotenv import load_dotenv
 
 # ── 환경 변수 로드 ──────────────────────────────────────────────
@@ -39,8 +39,7 @@ if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
     sys.exit(1)
 
 # ── Gemini 초기화 (키 검증 후 실행) ─────────────────────────────
-genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel(GEMINI_MODEL)
+client = genai.Client(api_key=GEMINI_API_KEY)
 print(f"✓ Gemini 초기화 완료: {GEMINI_MODEL}")
 
 
@@ -181,7 +180,7 @@ def analyze_with_gemini(data: dict) -> str:
 마지막에 오늘의 시장 총평을 2~3줄로 작성해줘.
 """
 
-    response = model.generate_content(prompt)
+    response = client.models.generate_content(model=GEMINI_MODEL, contents=prompt)
     return response.text
 
 
