@@ -5,6 +5,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from datetime import datetime
+import time
 import numpy as np
 from scipy.signal import argrelextrema
 from google import genai
@@ -295,6 +296,22 @@ def save_qa_to_file(question, answer):
 with st.sidebar:
     st.markdown("### 🤖 Quantum Sidekick")
     st.markdown("현재 대시보드 데이터를 기반으로 질문에 답변하며, 모든 대화는 `java/answer` 폴더에 저장됩니다.")
+
+    # --- Gemini 모델 선택 ---
+    GEMINI_MODELS = {
+        "⚡ gemini-flash-latest": "gemini-flash-latest",
+        "✨ gemini-2.5-flash": "gemini-2.5-flash",
+        "🚀 gemini-3-flash-preview": "gemini-3-flash-preview",
+        "💨 gemini-2.5-flash-lite": "gemini-2.5-flash-lite",
+    }
+    selected_model_label = st.selectbox(
+        "🧠 Gemini 모델 선택",
+        options=list(GEMINI_MODELS.keys()),
+        index=0,
+        key="gemini_model_select"
+    )
+    selected_model = GEMINI_MODELS[selected_model_label]
+
     st.divider()
 
     # 채팅 기록 초기화
@@ -321,24 +338,58 @@ with st.sidebar:
             with st.chat_message("assistant"):
                 if api_key:
                     try:
-                        # 현재 데이터 컨텍스트 생성
+                        # 현재 데이터 컨텍스트 생성 (종목명 우선 표시)
                         context = "현재 분석 중인 종목 데이터:\n"
                         if data_store:
                             for tid, stats in data_store.items():
-                                context += f"- {tid}: 현재가 {stats['price']:.2f}, RSI {stats['rsi']:.1f}, 패턴 {stats['pattern_label']}\n"
+                                # display_names(사용자 지정) → yfinance name → ticker 코드 순으로 fallback
+                                stock_name = display_names.get(tid) or stats.get('name') or tid
+                                context += f"- {stock_name} ({tid}): 현재가 {stats['price']:.2f}, RSI {stats['rsi']:.1f}, 패턴 {stats['pattern_label']}\n"
                         else:
                             context += "데이터 로딩 중...\n"
-                        
+
                         system_prompt = f"너는 20년 경력의 시니어 퀀트 애널리스트야. 다음 데이터를 참고해서 사용자의 질문에 전문적이고 친절하게 답변해줘.\n\n{context}"
-                        
-                        # 채팅 히스토리 포함 전송
-                        chat = client.chats.create(model=model_name)
+
+                        # 채팅 히스토리 포함 전송 (타이머 포함)
+                        chat = client.chats.create(model=selected_model)
                         full_prompt = f"{system_prompt}\n\n사용자 질문: {prompt}"
-                        response = chat.send_message(message=full_prompt)
-                        
+
+                        start_time = time.time()
+                        with st.status(f"⏳ {selected_model_label} 응답 생성 중...", expanded=False) as status:
+                            timer_placeholder = st.empty()
+                            # 실시간 타이머 업데이트 (폴링 방식)
+                            import threading
+                            response_holder = [None]
+                            error_holder = [None]
+
+                            def call_api():
+                                try:
+                                    response_holder[0] = chat.send_message(message=full_prompt)
+                                except Exception as ex:
+                                    error_holder[0] = ex
+
+                            thread = threading.Thread(target=call_api)
+                            thread.start()
+
+                            while thread.is_alive():
+                                elapsed = time.time() - start_time
+                                timer_placeholder.markdown(f"⏱️ 경과 시간: **{elapsed:.1f}초**")
+                                time.sleep(0.1)
+
+                            thread.join()
+                            elapsed = time.time() - start_time
+                            timer_placeholder.markdown(f"✅ 완료: **{elapsed:.1f}초** 소요")
+
+                            if error_holder[0]:
+                                raise error_holder[0]
+
+                            status.update(label=f"✅ 완료 ({elapsed:.1f}초)", state="complete", expanded=False)
+
+                        response = response_holder[0]
                         st.markdown(response.text)
+                        st.caption(f"🕐 응답 시간: {elapsed:.1f}초 | 모델: {selected_model_label}")
                         st.session_state.messages.append({"role": "assistant", "content": response.text})
-                        
+
                         # 대화 저장
                         save_qa_to_file(prompt, response.text)
                     except Exception as e:
