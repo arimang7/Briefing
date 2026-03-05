@@ -303,6 +303,7 @@ with st.sidebar:
         "✨ gemini-2.5-flash": "gemini-2.5-flash",
         "🚀 gemini-3-flash-preview": "gemini-3-flash-preview",
         "💨 gemini-2.5-flash-lite": "gemini-2.5-flash-lite",
+        "🔬 gemini-3.1-flash-lite-preview": "gemini-3.1-flash-lite-preview",
     }
     selected_model_label = st.selectbox(
         "🧠 Gemini 모델 선택",
