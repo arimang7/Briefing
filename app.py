@@ -415,12 +415,17 @@ existing_groups = list(favorites.keys())
 if existing_groups:
     selected_group = st.selectbox(
         "📁 분석할 관심종목 그룹 선택 (Select Group to Analyze)",
-        options=["전체 보기"] + existing_groups,
+        options=["선택 안 함 (Please select a group)", "전체 보기"] + existing_groups,
         index=0,
         key="main_group_filter"
     )
 else:
-    selected_group = "전체 보기"
+    selected_group = "선택 안 함 (Please select a group)"
+
+# 초기 선택 안 함 상태일 때 데이터 수집 차단 및 대기
+if selected_group == "선택 안 함 (Please select a group)":
+    st.info("💡 분석을 시작하려면 상단의 드롭다운 메뉴에서 관심종목 그룹을 선택해 주세요 (Please select a group to start analysis).")
+    st.stop()
 
 # 선택된 그룹에 따라 fetch할 액티브 자산 목록만 추출 (드롭다운 변경 시 해당 종목만 로드)
 if selected_group == "전체 보기":
