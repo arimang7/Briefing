@@ -292,25 +292,61 @@ def fetch_stock_data(tickers: list, display_names: dict = {}) -> dict:
 
 
 # ── Gemini 매수/매도 분석 ─────────────────────────────────────────
-def analyze_with_gemini(data: dict) -> str:
+def analyze_with_gemini(data: dict, assets: dict = None) -> str:
     today = datetime.now().strftime("%Y년 %m월 %d일")
 
-    # 데이터 요약 텍스트 생성 (고급 보조 지표 및 눌림목 감지 상태 포함)
-    summary_lines = []
-    for ticker, d in data.items():
-        summary_lines.append(
-            f"- {d['name']} ({d['url']}): 현재가 {d['price']:.2f}, "
-            f"등락 {d['change_pct']:+.1f}%, "
-            f"RSI(14) {d['rsi']:.1f} ({d['rsi_signal']}), "
-            f"20일생명선 추세 [{d['ma20_trend']}], "
-            f"볼린저밴드 [{d['bb_status']}], "
-            f"MACD [{d['macd_status']}], "
-            f"OBV자금수급 [{d['obv_trend']}], "
-            f"캔들패턴 [{d['candle_pattern']}], "
-            f"그랜빌눌림목판정 [{d['pullback_eligible']}], "
-            f"하모닉패턴 [{d['pattern']}]"
-        )
-    data_text = "\n".join(summary_lines)
+    # 1. 그룹별 분류 딕셔너리 생성
+    groups_summary = {
+        "관심종목-메인": [],
+        "보유주": [],
+        "매크로 및 지수": []
+    }
+
+    # assets가 제공되면 그룹 매핑 수행
+    if assets and "favorites" in assets:
+        for ticker, d in data.items():
+            assigned = False
+            # favorites 내부 그룹 순회
+            for group_name, tickers in assets["favorites"].items():
+                if ticker in tickers:
+                    groups_summary.setdefault(group_name, []).append(d)
+                    assigned = True
+                    break
+            
+            # favorites에 없으면 매크로/스프레드인지 확인
+            if not assigned:
+                if ticker in assets.get("macro_ids", []) or ticker == "SPREAD_10Y2Y":
+                    groups_summary["매크로 및 지수"].append(d)
+                else:
+                    groups_summary.setdefault("기타", []).append(d)
+    else:
+        # assets가 제공되지 않았을 때의 하방 호환성 (단일 리스트 정렬)
+        for ticker, d in data.items():
+            if ticker in ["^TNX", "^IRX", "^VIX", "DX-Y.NYB", "GC=F", "CL=F", "SI=F", "^IXIC", "^KS11", "SPREAD_10Y2Y"]:
+                groups_summary["매크로 및 지수"].append(d)
+            else:
+                groups_summary["관심종목-메인"].append(d)
+
+    # 2. 데이터 텍스트 포맷팅 (그룹별 제목 섹션 명시)
+    data_text_parts = []
+    for group_name, items in groups_summary.items():
+        if not items:
+            continue
+        data_text_parts.append(f"\n■ [{group_name}] 종목 데이터")
+        for d in items:
+            data_text_parts.append(
+                f"- {d['name']} ({d['url']}): 현재가 {d['price']:.2f}, "
+                f"등락 {d['change_pct']:+.1f}%, "
+                f"RSI(14) {d['rsi']:.1f} ({d['rsi_signal']}), "
+                f"20일생명선 추세 [{d['ma20_trend']}], "
+                f"볼린저밴드 [{d['bb_status']}], "
+                f"MACD [{d['macd_status']}], "
+                f"OBV자금수급 [{d['obv_trend']}], "
+                f"캔들패턴 [{d['candle_pattern']}], "
+                f"그랜빌눌림목판정 [{d['pullback_eligible']}], "
+                f"하모닉패턴 [{d['pattern']}]"
+            )
+    data_text = "\n".join(data_text_parts)
 
     prompt = f"""너는 20년 경력의 시니어 퀀트 애널리스트야.
 오늘({today}) 아침 기준 아래 종목 데이터를 분석해서 매수/매도/관망 판단을 내려줘.
@@ -325,17 +361,26 @@ def analyze_with_gemini(data: dict) -> str:
 4. **볼린저 밴드 변동성**: 밴드가 매우 좁혀지는 수축(Squeeze)은 강력한 에너지 응축 구간으로 조만간 큰 변동성 돌파가 나옴을 뜻한다. 상한선 돌파는 단기 과열(매도 고려), 하한선 이탈은 단기 과매도(반등 매수 고려) 상태다.
 5. **MACD & RSI 다차원 결합**: 추세(이평선) x 모멘텀(MACD 0선 돌파 및 골든/데드크로스) x 과열도(RSI 30이하 과매도, 70이상 과매수)를 결합하여 분석하라. 주가 고점은 오르는데 보조지표 고점이 낮아지는 일반 다이버전스는 강력한 추세 하락 반전 신호다.
 
-[종목 데이터]
+[그룹별 종목 데이터]
 {data_text}
 
-[출력 형식 - 반드시 아래 형식으로만 답변]
-각 종목마다 한 줄:
-🟢 매수 [주식명](링크): [이유 한 줄 - 사카타 5법/그랜빌 눌림목/OBV 매집/RSI 과매도 등 위의 분석 원칙 근거들을 직접 인용하여 설득력 있게 설명]
-🔴 매도 [주식명](링크): [이유 한 줄 - 과열/자금 분산/데드크로스/이탈 등 기술적 근거를 설명]
-⚪ 관망 [주식명](링크): [이유 한 줄 - 횡보/방향성 탐색/삼법 횡보 구간 등 근거를 설명]
+[출력 형식 - 반드시 아래 형식으로 그룹별로 나누어서 답변해줘]
+각 그룹별로 판정을 분리하여 보고하되, 매크로 및 지수 그룹은 단순 참고용이므로 개별 매수/매도 판정 목록에서는 제외해라.
+
+■ [관심종목-메인] 분석 판정
+(관심종목-메인에 속하는 종목들에 대해 한 줄씩 판정 작성)
+🟢 매수 [주식명](링크): [이유 한 줄 - 사카타/그랜빌 눌림목/OBV 매집 등 근거 인용]
+🔴 매도 [주식명](링크): [이유 한 줄...]
+⚪ 관망 [주식명](링크): [이유 한 줄...]
+
+■ [보유주] 분석 판정
+(보유주에 속하는 종목들에 대해 한 줄씩 판정 작성)
+🟢 매수 [주식명](링크): [이유 한 줄 - 보유 관점 추가 매수 적격성 또는 그랜빌 요건 설명]
+🔴 매도 [주식명](링크): [이유 한 줄 - 리스크 관리 차원의 비중 축소/매도 근거 설명]
+⚪ 관망 [주식명](링크): [이유 한 줄 - 보유 지속 또는 방향성 대기 판단 설명]
 
 * 주식명은 데이터에 제공된 이름을 사용하고, 링크도 그대로 포함해줘.
-* 판단 근거 기술 시 "20일선 지지 및 거래량 급감 확인", "OBV 매집 포착", "RSI 과매도 구간 진입", "하모닉 패턴 감지" 등 배운 차트 분석 용어를 직접 언급하여 신뢰성 있게 적어줘.
+* 판단 근거 기술 시 "20일선 지지 및 거래량 급감 확인", "OBV 매집 포착", "RSI 과매도 구간 진입" 등 배운 차트 분석 용어를 직접 언급하여 신뢰성 있게 적어줘.
 
 마지막에 오늘의 시장 총평과 주요 투자 포인트(10Y-3M 장단기 금리차 스프레드 상황 포함)를 3줄로 작성해줘.
 """
@@ -362,8 +407,17 @@ def send_telegram(text: str) -> bool:
         }
         resp = requests.post(url, json=payload, timeout=10)
         if not resp.ok:
-            print(f"  [ERROR] Telegram 오류: {resp.status_code} {resp.text}")
-            success = False
+            print(f"  [WARNING] Telegram Markdown 전송 실패 ({resp.status_code} {resp.text}), 일반 텍스트 모드로 재시도합니다.")
+            payload_fallback = {
+                "chat_id":    TELEGRAM_CHAT_ID,
+                "text":       chunk,
+            }
+            resp_fallback = requests.post(url, json=payload_fallback, timeout=10)
+            if not resp_fallback.ok:
+                print(f"  [ERROR] Telegram 일반 텍스트 재전송도 실패: {resp_fallback.status_code} {resp_fallback.text}")
+                success = False
+            else:
+                print("  [OK] Telegram 일반 텍스트 모드로 전송 성공")
         else:
             print("  [OK] Telegram 발송 성공")
 
@@ -436,7 +490,7 @@ def main():
 
     # 2. Gemini 분석
     print("\n[2/3] Gemini AI 매수/매도 분석 중...")
-    analysis = analyze_with_gemini(data)
+    analysis = analyze_with_gemini(data, assets)
     print("  [OK] 분석 완료")
 
     # 3. Telegram 발송
