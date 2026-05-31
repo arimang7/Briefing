@@ -1,4 +1,4 @@
-name: Daily Stock Alert (08:00 KST)
+name: Daily Stock Alert (08:00 KST) - Technical Chart Analyst
 
 on:
   # 매일 한국시간 08:00 = UTC 23:00 (전날)
@@ -37,10 +37,11 @@ jobs:
           echo "TELEGRAM_BOT_TOKEN set: $( [ -n "$TELEGRAM_BOT_TOKEN" ] && echo YES || echo NO )"
           echo "TELEGRAM_CHAT_ID set:   $( [ -n "$TELEGRAM_CHAT_ID" ]   && echo YES || echo NO )"
 
-      - name: Run daily alert
+      - name: Run daily alert with Advanced Technical Analysis
+        # 사카타 5법, 그랜빌 8법칙, OBV 매집/분산, 볼린저 밴드, MACD 다차원 분석 실행
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          GEMINI_MODEL: ${{ secrets.GEMINI_MODEL || 'gemini-1.5-flash' }}
+          GEMINI_MODEL: ${{ secrets.GEMINI_MODEL || 'gemini-3.5-flash' }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}

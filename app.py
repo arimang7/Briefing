@@ -98,6 +98,161 @@ def calc_rsi(series, length=14):
     rs = avg_gain / avg_loss
     return 100 - (100 / (1 + rs))
 
+# --- 기술적 보조 지표 계산 함수 ---
+def compute_technical_indicators(df):
+    df = df.copy()
+    if len(df) < 40:
+        # 데이터가 부족하면 빈 값이나 기본값으로 채움
+        df['MA5'] = df['Close']
+        df['MA20'] = df['Close']
+        df['MA60'] = df['Close']
+        df['MA120'] = df['Close']
+        df['BB_upper'] = df['Close']
+        df['BB_lower'] = df['Close']
+        df['MACD'] = 0.0
+        df['MACD_signal'] = 0.0
+        df['MACD_hist'] = 0.0
+        df['OBV'] = 0.0
+        return df
+
+    # 이동평균선 (Moving Averages) - 5일(심리), 20일(생명), 60일(수급), 120일(경기)
+    df['MA5'] = df['Close'].rolling(window=5).mean()
+    df['MA20'] = df['Close'].rolling(window=20).mean()
+    df['MA60'] = df['Close'].rolling(window=60).mean()
+    df['MA120'] = df['Close'].rolling(window=120).mean()
+
+    # 볼린저 밴드 (Bollinger Bands) - 20일선 기준 상하 2표준편차
+    std = df['Close'].rolling(window=20).std()
+    df['BB_upper'] = df['MA20'] + 2 * std
+    df['BB_lower'] = df['MA20'] - 2 * std
+
+    # MACD - 12일선과 26일선 지수이평선 차이
+    df['EMA12'] = df['Close'].ewm(span=12, adjust=False).mean()
+    df['EMA26'] = df['Close'].ewm(span=26, adjust=False).mean()
+    df['MACD'] = df['EMA12'] - df['EMA26']
+    df['MACD_signal'] = df['MACD'].ewm(span=9, adjust=False).mean()
+    df['MACD_hist'] = df['MACD'] - df['MACD_signal']
+
+    # OBV (On-Balance Volume) - 거래량 누적 계산
+    obv = [0.0]
+    close = df['Close'].values
+    volume = df['Volume'].values
+    for i in range(1, len(close)):
+        if close[i] > close[i-1]:
+            obv.append(obv[-1] + float(volume[i]))
+        elif close[i] < close[i-1]:
+            obv.append(obv[-1] - float(volume[i]))
+        else:
+            obv.append(obv[-1])
+    df['OBV'] = obv
+    return df
+
+# --- 매매 시그널 추출 및 20일선 눌림목 감지 함수 ---
+def extract_signals(df):
+    if len(df) < 20:
+        return {
+            "ma20_trend": "분석 불가능",
+            "bb_status": "데이터 부족",
+            "macd_status": "데이터 부족",
+            "obv_trend": "데이터 부족",
+            "candle_pattern": "데이터 부족",
+            "pullback_eligible": "아님"
+        }
+    
+    price = df['Close'].iloc[-1]
+    prev_price = df['Close'].iloc[-2]
+    volume = df['Volume'].iloc[-1]
+    
+    # 1. 20일선(생명선) 추세
+    ma20 = df['MA20'].iloc[-1]
+    prev_ma20 = df['MA20'].iloc[-2]
+    ma20_trend = "상승세 ↗" if ma20 > prev_ma20 else "하락세 ↘"
+    
+    # 2. 볼린저 밴드 이격도 및 변동성 수축 감지
+    bb_upper = df['BB_upper'].iloc[-1]
+    bb_lower = df['BB_lower'].iloc[-1]
+    bb_width = (bb_upper - bb_lower) / ma20 if ma20 != 0 else 0
+    
+    # 최근 10일 볼린저 밴드 폭 평균 대비 수축 여부 판단
+    prev_bb_widths = ((df['BB_upper'] - df['BB_lower']) / df['MA20']).tail(10)
+    avg_bb_width = prev_bb_widths.mean()
+    
+    bb_status = "중립 ⚪"
+    if bb_width < avg_bb_width * 0.9:
+        bb_status = "변동성 수축 (Squeeze) ⚡ (에너지 응축 중!)"
+    elif price >= bb_upper:
+        bb_status = "상한선 돌파 🔴 (과열 가능성)"
+    elif price <= bb_lower:
+        bb_status = "하한선 이탈 🟢 (과매도 반등 가능)"
+        
+    # 3. MACD 모멘텀 골든/데드크로스 및 추세 판단
+    macd = df['MACD'].iloc[-1]
+    macd_sig = df['MACD_signal'].iloc[-1]
+    prev_macd = df['MACD'].iloc[-2]
+    prev_macd_sig = df['MACD_signal'].iloc[-2]
+    
+    macd_status = "중립"
+    if prev_macd < prev_macd_sig and macd >= macd_sig:
+        macd_status = "골든크로스 발생 🔼 (상승 전환!)"
+    elif prev_macd > prev_macd_sig and macd <= macd_sig:
+        macd_status = "데드크로스 발생 🔽 (하락 주의!)"
+    elif macd > 0:
+        macd_status = "상승 모멘텀 우세 (0선 위)"
+    else:
+        macd_status = "하락 모멘텀 우세 (0선 아래)"
+        
+    # 4. OBV 수급 강도 (매집/분산 감지) - 최근 10영업일 비교
+    price_change = (df['Close'].iloc[-1] - df['Close'].iloc[-10]) / df['Close'].iloc[-10] if df['Close'].iloc[-10] != 0 else 0
+    obv_change = (df['OBV'].iloc[-1] - df['OBV'].iloc[-10]) / abs(df['OBV'].iloc[-10]) if df['OBV'].iloc[-10] != 0 else 0
+    
+    obv_trend = "중립 ⚪"
+    if abs(price_change) < 0.025 and obv_change > 0.05:
+        obv_trend = "세력 매집 포착 💎 (가격 횡보 중 거래량 유입!)"
+    elif price_change > 0.05 and obv_change < -0.02:
+        obv_trend = "자금 분산 감지 ⚠️ (가격 상승 중 진짜 자금 이탈!)"
+    elif obv_change > 0:
+        obv_trend = "우상향 ↗ (수급 강세)"
+    else:
+        obv_trend = "우하향 ↘ (수급 약세)"
+        
+    # 5. 캔들차트 시장 심리 (도지/망치 지지 확인)
+    op = df['Open'].iloc[-1]
+    hi = df['High'].iloc[-1]
+    lo = df['Low'].iloc[-1]
+    cl = df['Close'].iloc[-1]
+    body = abs(cl - op)
+    rng = hi - lo if hi != lo else 1.0
+    
+    candle_pattern = "일반형"
+    is_doji = body <= rng * 0.1
+    is_hammer = (min(op, cl) - lo) >= rng * 0.6 and (hi - max(op, cl)) <= rng * 0.15
+    
+    if is_doji:
+        candle_pattern = "도지(Doji) ✖ (매수/매도 팽팽한 심리적 균형)"
+    elif is_hammer:
+        candle_pattern = "망치형(Hammer) 🔨 (저가 매수세 유입, 강력 바닥 시그널)"
+        
+    # 6. 그랜빌의 20일선 눌림목 3대 요건 판정
+    # 요건 A: 20일선이 지지를 나타내며 주가가 위에 위치함
+    # 요건 B: 20일선 조정 시 거래량이 눈에 띄게 감소함 (최근 5일 평균 거래량의 80% 이하)
+    # 요건 C: 도지 또는 망치형 지지 캔들이 출현함
+    avg_vol = df['Volume'].tail(5).mean()
+    vol_dropped = volume < avg_vol * 0.8
+    near_ma20 = ma20 * 0.98 <= cl <= ma20 * 1.02
+    
+    pullback_eligible = "아님"
+    if cl > ma20 and near_ma20 and vol_dropped and (is_doji or is_hammer):
+        pullback_eligible = "★ 그랜빌 20일선 눌림목 매수 적격 ★ 🎯 (거래량 급감 + 지지 캔들 확인!)"
+        
+    return {
+        "ma20_trend": ma20_trend,
+        "bb_status": bb_status,
+        "macd_status": macd_status,
+        "obv_trend": obv_trend,
+        "candle_pattern": candle_pattern,
+        "pullback_eligible": pullback_eligible
+    }
+
 # --- 하모닉 패턴 분석 알고리즘 ---
 def detect_patterns(df):
     if len(df) < 40: return "Insufficient Data", None
@@ -111,7 +266,6 @@ def detect_patterns(df):
     
     last_5 = points.tail(5)
     p_vals = last_5['Close'].values
-    p_idx = last_5.index
     X, A, B, C, D = p_vals
     
     # Bullish/Bearish 판별
@@ -121,7 +275,6 @@ def detect_patterns(df):
     # 비율 계산
     AB_XA = abs(B-A) / abs(A-X)
     CD_AB = abs(D-C) / abs(B-A) if abs(B-A) != 0 else 0
-    AD_XA = abs(D-X) / abs(A-X)
     
     pattern_type = "Scanning"
     if 0.58 < AB_XA < 0.65: pattern_type = "Gartley"
@@ -146,6 +299,8 @@ def fetch_all_assets(tickers):
             if df.empty: continue
             
             df['RSI'] = calc_rsi(df['Close'], length=14)
+            df = compute_technical_indicators(df)
+            sig = extract_signals(df)
             pat_label, pat_points = detect_patterns(df.copy())
             
             # Fetch name (Optional fallback)
@@ -164,7 +319,8 @@ def fetch_all_assets(tickers):
                 'vol': df['Volume'].iloc[-1],
                 'rsi': df['RSI'].iloc[-1],
                 'pattern_label': pat_label,
-                'pattern_points': pat_points
+                'pattern_points': pat_points,
+                'signals': sig
             }
         except: continue
     return data
@@ -409,17 +565,42 @@ with st.sidebar:
             with st.chat_message("assistant"):
                 if api_key:
                     try:
-                        # 현재 데이터 컨텍스트 생성 (종목명 우선 표시)
-                        context = "현재 분석 중인 종목 데이터:\n"
+                        # 현재 데이터 컨텍스트 생성 (고급 보조 지표 및 눌림목 감지 상태 포함)
+                        context = "현재 분석 중인 상세 종목 기술 지표 데이터:\n"
                         if data_store:
                             for tid, stats in data_store.items():
-                                # display_names(사용자 지정) → yfinance name → ticker 코드 순으로 fallback
                                 stock_name = display_names.get(tid) or stats.get('name') or tid
-                                context += f"- {stock_name} ({tid}): 현재가 {stats['price']:.2f}, RSI {stats['rsi']:.1f}, 패턴 {stats['pattern_label']}\n"
+                                sig = stats.get('signals', {})
+                                context += (
+                                    f"- {stock_name} ({tid}): 현재가 {stats['price']:.2f}, "
+                                    f"RSI(14) {stats['rsi']:.1f}, "
+                                    f"20일생명선 추세 [{sig.get('ma20_trend')}], "
+                                    f"볼린저밴드 [{sig.get('bb_status')}], "
+                                    f"MACD [{sig.get('macd_status')}], "
+                                    f"OBV자금수급 [{sig.get('obv_trend')}], "
+                                    f"캔들패턴 [{sig.get('candle_pattern')}], "
+                                    f"그랜빌눌림목판정 [{sig.get('pullback_eligible')}], "
+                                    f"하모닉패턴 [{stats['pattern_label']}]\n"
+                                )
                         else:
                             context += "데이터 로딩 중...\n"
 
-                        system_prompt = f"너는 20년 경력의 시니어 퀀트 애널리스트야. 다음 데이터를 참고해서 사용자의 질문에 전문적이고 친절하게 답변해줘.\n\n{context}"
+                        system_prompt = f"""너는 20년 경력의 시니어 퀀트 애널리스트이자 기술적 분석 대가인 'Quantum Sidekick'이야.
+다음 데이터를 참고하여 사용자의 투자 질의에 전문적이고 친절하게 답변해줘.
+
+너는 항상 전통적인 차트 원칙과 퀀트 분석 기준인 **[주식 차트 분석 및 실전 매매 가이드]**의 다음 5대 규칙에 기반하여 분석해야 한다:
+
+1. **캔들 차트의 본질 & 사카타 5법**: 캔들은 대중 심리의 결과물이다. '도지(Doji)'는 팽팽한 힘의 균형/방향성 탐색을 의미하고, '망치형(Hammer)'은 강력한 하단 지지 신호다. 삼산(헤드앤숄더)은 강력한 천정 및 하락 전환, 삼천(역헤드앤숄더)은 강력한 바닥 및 상승 전환 신호다.
+2. **그랜빌 8법칙 & 20일 생명선 눌림목**: 20일 이동평균선(생명선)이 우상향하고 주가가 그 위에 있을 때, 일시 조정으로 20일선 근처까지 내려왔을 때 거래량이 눈에 띄게 급감(Vol Dropped)하고 도지 또는 망치형 캔들로 지지가 확인되면 '그랜빌 20일선 눌림목 매수 적격(Pullback Eligible)' 신호가 된다.
+3. **OBV (On-Balance Volume) 거래량 수급**: 주가가 횡보하는데 OBV선이 꾸준히 상승하면 세력의 '매집' 신호로 급등 가능성이 크고, 주가가 고점을 높이는데 OBV선이 낮아지거나 꺾이면 개인들만 매수하는 '분산(이탈)' 신호로 하락 전환 임박 경고다.
+4. **볼린저 밴드 변동성**: 밴드가 좁혀지는 수축(Squeeze)은 강력한 에너지 응축 구간으로 조만간 큰 추세 돌파가 나옴을 뜻한다. 상한선 돌파는 단기 과열, 하한선 돌파는 단기 과매도 상태다.
+5. **MACD & RSI 다차원 결합**: 추세(이평선) x 모멘텀(MACD 0선 돌파 및 골든/데드크로스) x 변동성(RSI 30이하 과매도, 70이상 과매수)을 결합하여 분석하라. 특히 주가는 고점을 높이나 보조지표 고점은 낮아지는 일반 다이버전스는 강력한 반전 신호다.
+
+[실시간 데이터 컨텍스트]
+{context}
+
+사용자 질문에 답변할 때, 위 데이터에 들어있는 RSI, 20일선 추세, 볼린저 밴드 상태, MACD 모멘텀, OBV 수급 강도, 눌림목 판정 정보를 적극 인용하여 애널리스트처럼 설득력 있게 한글로 설명해줘.
+"""
 
                         # 채팅 히스토리 포함 전송 (타이머 포함)
                         chat = client.chats.create(model=selected_model)
@@ -649,12 +830,24 @@ for section_title, tickers, cols_per_row in sections:
                         st.markdown(f'<p class="ticker-title">{title}</p>', unsafe_allow_html=True)
                         st.markdown(f'<div class="pattern-label">{d["pattern_label"]}</div>', unsafe_allow_html=True)
                         
-                        # RSI 상태 하이라이트
+                        # RSI 및 기술적 보조 지표 상태 하이라이트
                         rsi_val = d['rsi']
                         rsi_class = "rsi-neutral"
                         if rsi_val >= 70: rsi_class = "rsi-overbought"
                         elif rsi_val <= 30: rsi_class = "rsi-oversold"
-                        st.markdown(f"**RSI(14):** <span class='{rsi_class}'>{rsi_val:.1f}</span>", unsafe_allow_html=True)
+                        
+                        sig = d.get('signals', {})
+                        st.markdown(f"""
+                        *   **RSI (14)**: <span class='{rsi_class}'>{rsi_val:.1f}</span>
+                        *   **20일 생명선**: {sig.get('ma20_trend', 'N/A')}
+                        *   **볼린저 밴드**: {sig.get('bb_status', 'N/A')}
+                        *   **MACD 모멘텀**: {sig.get('macd_status', 'N/A')}
+                        *   **OBV 자금수급**: {sig.get('obv_trend', 'N/A')}
+                        *   **심리 캔들패턴**: {sig.get('candle_pattern', 'N/A')}
+                        """, unsafe_allow_html=True)
+                        
+                        if sig.get('pullback_eligible') != "아님":
+                            st.markdown(f"🔥 **그랜빌 눌림목**: <span style='color: #ECC94B; font-weight: bold;'>{sig.get('pullback_eligible')}</span>", unsafe_allow_html=True)
 
                         # --- 차트 생성 (Height 상향) ---
                         fig = make_subplots(
@@ -664,13 +857,42 @@ for section_title, tickers, cols_per_row in sections:
                             row_heights=[0.6, 0.2, 0.2]
                         )
 
-                        # 1. 캔들스틱 차트
+                        # 1. 볼린저 밴드 영역 채우기 오버레이 (가장 뒷배경에 그리기 위해 맨 처음 추가)
+                        if 'BB_upper' in df.columns and 'BB_lower' in df.columns:
+                            fig.add_trace(go.Scatter(
+                                x=df.index, y=df['BB_upper'], line=dict(color='rgba(113, 128, 150, 0.25)', width=1, dash='dot'),
+                                name='BB Upper', showlegend=False
+                            ), row=1, col=1)
+                            fig.add_trace(go.Scatter(
+                                x=df.index, y=df['BB_lower'], line=dict(color='rgba(113, 128, 150, 0.25)', width=1, dash='dot'),
+                                name='BB Lower', fill='tonexty', fillcolor='rgba(113, 128, 150, 0.04)',
+                                showlegend=False
+                            ), row=1, col=1)
+
+                        # 2. 이동평균선 오버레이 (5일선: 심리선, 20일선: 생명선, 60일선: 수급선)
+                        if 'MA5' in df.columns:
+                            fig.add_trace(go.Scatter(
+                                x=df.index, y=df['MA5'], line=dict(color='#4299E1', width=1.2, dash='dash'),
+                                name='5일선(심리선)'
+                            ), row=1, col=1)
+                        if 'MA20' in df.columns:
+                            fig.add_trace(go.Scatter(
+                                x=df.index, y=df['MA20'], line=dict(color='#ED8936', width=2.2),
+                                name='20일선(생명선)'
+                            ), row=1, col=1)
+                        if 'MA60' in df.columns:
+                            fig.add_trace(go.Scatter(
+                                x=df.index, y=df['MA60'], line=dict(color='#38A169', width=1.2),
+                                name='60일선(수급선)'
+                            ), row=1, col=1)
+
+                        # 3. 캔들스틱 차트
                         fig.add_trace(go.Candlestick(
                             x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'],
                             name='OHLC', increasing_line_color='#00C805', decreasing_line_color='#FF4B4B'
                         ), row=1, col=1)
 
-                        # 2. 하모닉 시각화
+                        # 4. 하모닉 시각화
                         if d['pattern_points'] is not None:
                             pts = d['pattern_points']
                             x_coords, y_coords = pts.index, pts['Close'].values
@@ -694,13 +916,13 @@ for section_title, tickers, cols_per_row in sections:
                                 line=dict(width=0), showlegend=False
                             ), row=1, col=1)
 
-                        # 3. 거래량
+                        # 5. 거래량
                         v_colors = ['#FF4B4B' if c < o else '#00C805' for c, o in zip(df['Close'], df['Open'])]
                         fig.add_trace(go.Bar(
                             x=df.index, y=df['Volume'], marker_color=v_colors, name='Vol'
                         ), row=2, col=1)
 
-                        # 4. RSI 및 기준선
+                        # 6. RSI 및 기준선
                         fig.add_trace(go.Scatter(x=df.index, y=df['RSI'], line=dict(color='#63B3ED', width=2), name='RSI'), row=3, col=1)
                         fig.add_hline(y=70, line_dash="dot", line_color="#C53030", opacity=0.5, row=3, col=1)
                         fig.add_hline(y=30, line_dash="dot", line_color="#2F855A", opacity=0.5, row=3, col=1)
